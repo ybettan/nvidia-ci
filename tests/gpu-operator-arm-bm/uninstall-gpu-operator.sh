@@ -1,8 +1,9 @@
 #!/bin/bash
 
 set -e
+set -x
 
-subscription=$(oc get subscriptions.operators.coreos.com -o json | jq -r '.items[].metadata.name' | grep gpu-operator)
+subscription="$(oc get subscriptions.operators.coreos.com -o json | jq -r '.items[].metadata.name' | grep gpu-operator)" || exit 0
 if [ -z ${subscription} ]; then
     echo Subscription is empty.
     exit -1

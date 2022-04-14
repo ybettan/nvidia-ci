@@ -15,7 +15,7 @@ if [ "${channel}" = "stable" ]; then
     ${oc_command} apply -f operatorgroup.yaml
     ${oc_command} apply -f _subscription.yaml
 else
-    operator-sdk run bundle --timeout=1m -n nvidia-gpu-operator --install-mode OwnNamespace "${bundle}"
+    operator-sdk run bundle --kubeconfig /var/run/secrets/armsnokubeconfig--timeout=1m -n nvidia-gpu-operator --install-mode OwnNamespace "${bundle}"
 fi
 
 #todo: write a proper wait for the correct resource

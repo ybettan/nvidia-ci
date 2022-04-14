@@ -9,3 +9,5 @@ driver=$(cat ${config_file} | jq -r '.driver_image')
 channel=$(cat ${config_file} | jq -r '.channel')
 
 oc_command="oc --insecure-skip-tls-verify --kubeconfig /var/run/secrets/armsnokubeconfig"
+
+ls -lah /var/run/secrets

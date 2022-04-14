@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -e
+set -x
 
 config_file=config.json
 
@@ -11,3 +12,4 @@ channel=$(cat ${config_file} | jq -r '.channel')
 oc_command="oc --insecure-skip-tls-verify --kubeconfig /var/run/secrets/armsnokubeconfig"
 
 ls -lah /var/run/secrets
+cat /var/run/secrets/version

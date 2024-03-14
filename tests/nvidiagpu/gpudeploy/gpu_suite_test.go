@@ -1,0 +1,31 @@
+package nvidiagpu
+
+import (
+	"runtime"
+	"testing"
+
+	"github.com/openshift-kni/eco-goinfra/pkg/clients"
+	"github.com/rh-ecosystem-edge/nvidia-ci/tests/internal/reporter"
+
+	. "github.com/rh-ecosystem-edge/nvidia-ci/tests/internal/inittools"
+	"github.com/rh-ecosystem-edge/nvidia-ci/tests/nvidiagpu/gpudeploy/internal/tsparams"
+	_ "github.com/rh-ecosystem-edge/nvidia-ci/tests/nvidiagpu/gpudeploy/tests"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _, currentFile, _, _ = runtime.Caller(0)
+
+func TestGPUDeploy(t *testing.T) {
+	_, reporterConfig := GinkgoConfiguration()
+	reporterConfig.JUnitReport = GeneralConfig.GetJunitReportPath(currentFile)
+
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "GPU", Label(tsparams.Labels...), reporterConfig)
+}
+
+var _ = JustAfterEach(func() {
+	reporter.ReportIfFailed(
+		CurrentSpecReport(), currentFile, tsparams.ReporterNamespacesToDump, tsparams.ReporterCRDsToDump, clients.SetScheme)
+})

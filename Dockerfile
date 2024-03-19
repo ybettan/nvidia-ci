@@ -1,15 +1,21 @@
-FROM registry.access.redhat.com/ubi8/ubi
+FROM registry.access.redhat.com/ubi9/ubi
 
-MAINTAINER Red Hat Nvidia Team
+MAINTAINER Red Hat Ecosystem Engineering
 
 # Install dependencies
 RUN yum install -y \
-		glibc-langpack-en \
-		go git make jq vim wget rsync time && \
-	yum clean all && \
-	rm -rf $HOME/.cache && \
-	rm -rf /var/cache/yum
-
+    glibc-langpack-en \
+    go \
+    git \
+    make \
+    jq \
+    vim \
+    wget \
+    rsync \
+    time && \
+    yum clean all && \
+    rm -rf $HOME/.cache && \
+    rm -rf /var/cache/yum
 
 # Install dependencies: `oc`
 ARG OCP_CLI_VERSION=latest
@@ -18,14 +24,16 @@ RUN curl ${OCP_CLI_URL} | tar xfz - -C /usr/local/bin oc
 
 # Install dependencies: `operator-sdk`
 ARG OPERATOR_SDK_VERSION=v1.6.2
-ARG OPERATOR_SDK_URL=https://github.com/operator-framework/operator-sdk/releases/download/${OPERATOR_SDK_VERSION}
-RUN cd /usr/local/bin \
- && curl -LO ${OPERATOR_SDK_URL}/operator-sdk_linux_amd64 \
- && mv operator-sdk_linux_amd64 operator-sdk \
- && chmod +x operator-sdk
+RUN ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;; *) echo -n $(uname -m) ;; esac) && \
+    OS=$(uname | awk '{print tolower($0)}') && \
+    OPERATOR_SDK_DL_URL=https://github.com/operator-framework/operator-sdk/releases/download/${OPERATOR_SDK_VERSION} && \
+    curl -LO ${OPERATOR_SDK_DL_URL}/operator-sdk_${OS}_${ARCH} && \
+    chmod +x operator-sdk_${OS}_${ARCH} && \
+    mv operator-sdk_${OS}_${ARCH} /usr/local/bin/operator-sdk
 
 # Get the source code in there
-RUN git clone https://github.com/rh-ecosystem-edge/nvidia-ci.git /root/nvidia-ci
 WORKDIR /root/nvidia-ci
+
+COPY . .
 
 ENTRYPOINT ["bash"]

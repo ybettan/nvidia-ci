@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/rh-ecosystem-edge/nvidia-ci/internal/deploy"
 	"github.com/rh-ecosystem-edge/nvidia-ci/internal/inittools"
-	"github.com/rh-ecosystem-edge/nvidia-ci/internal/nvidiagpuconfig"
 
 	"github.com/openshift-kni/eco-goinfra/pkg/machine"
 	nfddeploy "github.com/rh-ecosystem-edge/nvidia-ci/internal/deploy"
@@ -53,8 +53,6 @@ var (
 
 	nfdCleanupAfterInstall bool = false
 
-	// NvidiaGPUConfig provides access to general configuration parameters.
-	nvidiaGPUConfig        *nvidiagpuconfig.NvidiaGPUConfig
 	gpuScaleCluster        bool = false
 	gpuCatalogSource            = "undefined"
 	gpuSubscriptionChannel      = "undefined"
@@ -90,36 +88,42 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 
 	Context("DeployGpu", Label("deploy-gpu-with-dtk"), func() {
 
-		nvidiaGPUConfig = nvidiagpuconfig.NewNvidiaGPUConfig()
+		dep := deploy.NewDeploy()
+
+		subConfig, err := dep.GetSubscriptionConfig()
+		Expect(err).NotTo(HaveOccurred())
+
+		machineSetConfig, err := dep.GetMachineSetConfig()
+		Expect(err).NotTo(HaveOccurred())
 
 		BeforeAll(func() {
-			if nvidiaGPUConfig.InstanceType == "" {
+			if machineSetConfig.InstanceType == "" {
 				glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_GPU_MACHINESET_INSTANCE_TYPE" +
 					" is not set, skipping scaling cluster")
 				gpuScaleCluster = false
 
 			} else {
 				glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_GPU_MACHINESET_INSTANCE_TYPE"+
-					" is set to '%s', scaling cluster to add a GPU enabled machineset", nvidiaGPUConfig.InstanceType)
+					" is set to '%s', scaling cluster to add a GPU enabled machineset", machineSetConfig.InstanceType)
 				gpuScaleCluster = true
 			}
 
-			if nvidiaGPUConfig.CatalogSource == "" {
+			if subConfig.CatalogSource == "" {
 				glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_CATALOGSOURCE"+
 					" is not set, using default GPU catalogsource '%s'", gpuCatalogSourceDefault)
 				gpuCatalogSource = gpuCatalogSourceDefault
 			} else {
-				gpuCatalogSource = nvidiaGPUConfig.CatalogSource
+				gpuCatalogSource = subConfig.CatalogSource
 				glog.V(gpuparams.GpuLogLevel).Infof("GPU catalogsource now set to env variable "+
 					"NVIDIAGPU_CATALOGSOURCE value '%s'", gpuCatalogSource)
 			}
 
-			if nvidiaGPUConfig.SubscriptionChannel == "" {
+			if subConfig.SubscriptionChannel == "" {
 				glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_SUBSCRIPTION_CHANNEL" +
 					" is not set, will deploy latest channel")
 				gpuSubscriptionChannel = "undefined"
 			} else {
-				gpuSubscriptionChannel = nvidiaGPUConfig.SubscriptionChannel
+				gpuSubscriptionChannel = subConfig.SubscriptionChannel
 				glog.V(gpuparams.GpuLogLevel).Infof("GPU Subscription Channel now set to env variable "+
 					"NVIDIAGPU_SUBSCRIPTION_CHANNEL value '%s'", gpuSubscriptionChannel)
 			}
@@ -247,7 +251,7 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 				By("Expand the OCP cluster using machineset instanceType from the env variable " +
 					"NVIDIAGPU_GPU_MACHINESET_INSTANCE_TYPE")
 
-				var instanceType = nvidiaGPUConfig.InstanceType
+				var instanceType = machineSetConfig.InstanceType
 
 				glog.V(gpuparams.GpuLogLevel).Infof(
 					"Initializing new MachineSetBuilder structure with the following params: %s, %s, %v",

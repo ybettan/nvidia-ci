@@ -1,5 +1,7 @@
 package deploy
 
+//FIXME: converge into the Deploy interface
+
 import (
 	"context"
 	"encoding/json"

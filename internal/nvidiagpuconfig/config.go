@@ -1,5 +1,7 @@
 package nvidiagpuconfig
 
+//FIXME: remove this package
+
 import (
 	"log"
 

@@ -25,6 +25,12 @@ build-container-image:
 install: deps-update install-ginkgo
 	@echo "Installing needed dependencies"
 
+TEST ?= ...
+
+.PHONY: unit-test
+unit-test:
+	go test github.com/rh-ecosystem-edge/nvidia-ci/$(TEST)
+
 run-tests:
 	@echo "Executing nvidiagpu test-runner script"
 	scripts/test-runner.sh

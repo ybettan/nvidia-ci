@@ -20,10 +20,18 @@ type BundleConfig struct {
 	BundleImage string `required:"true" envconfig:"GPU_BUNDLE_IMAGE"`
 }
 
-type Deploy interface {
-	GetMachineSetConfig() (*MachineSetConfig, error)
+type deployFromSubscription interface {
 	GetSubscriptionConfig() (*SubscriptionConfig, error)
+}
+
+type deployFromBundle interface {
 	GetBundleConfig() (*BundleConfig, error)
+}
+
+type Deploy interface {
+	deployFromSubscription
+	deployFromBundle
+	GetMachineSetConfig() (*MachineSetConfig, error)
 }
 
 type deployGPU struct{}

@@ -317,113 +317,27 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 			glog.V(gpuparams.GpuLogLevel).Infof("cluster architecture for GPU enabled worker node is: %s",
 				clusterArch)
 
-			By("Check if 'gpu-operator-certified' packagemanifest exists in GPU catalog")
-			glog.V(gpuparams.GpuLogLevel).Infof("Using GPU catalogsource '%s'", gpuCatalogSource)
+			dep := deploy.NewDeploy()
 
-			gpuPkgManifestBuilderByCatalog, err := olm.PullPackageManifestByCatalog(inittools.APIClient,
-				gpuPackage, gpuCatalogSourceNamespace, gpuCatalogSource)
-			Expect(err).ToNot(HaveOccurred(), "error getting GPU packagemanifest %s from catalog %s:"+
-				"  %v", gpuPackage, gpuCatalogSource, err)
-
-			glog.V(gpuparams.GpuLogLevel).Infof("The gpu packagemanifest name returned: %s",
-				gpuPkgManifestBuilderByCatalog.Object.Name)
-
-			By("Get the GPU Default Channel from Packagemanifest")
-			gpuChannelDefault := gpuPkgManifestBuilderByCatalog.Object.Status.DefaultChannel
-			glog.V(gpuparams.GpuLogLevel).Infof("The default gpu channel retrieved from packagemanifest is:  %v",
-				gpuChannelDefault)
-
-			By("Check if NVIDIA GPU Operator namespace exists, otherwise created it and label it")
-			nsBuilder := namespace.NewBuilder(inittools.APIClient, nvidiaGPUNamespace)
-			if nsBuilder.Exists() {
-				glog.V(gpuparams.GpuLogLevel).Infof("The namespace '%s' already exists",
-					nsBuilder.Object.Name)
-			} else {
-				glog.V(gpuparams.GpuLogLevel).Infof("Creating the namespace:  %v", nvidiaGPUNamespace)
-				createdNsBuilder, err := nsBuilder.Create()
-				Expect(err).ToNot(HaveOccurred(), "error creating namespace '%s' :  %v ",
-					nsBuilder.Definition.Name, err)
-
-				glog.V(gpuparams.GpuLogLevel).Infof("Successfully created namespace '%s'",
-					createdNsBuilder.Object.Name)
-
-				glog.V(gpuparams.GpuLogLevel).Infof("Labeling the newly created namespace '%s'",
-					nsBuilder.Object.Name)
-
-				labeledNsBuilder := createdNsBuilder.WithMultipleLabels(map[string]string{
-					"openshift.io/cluster-monitoring":    "true",
-					"pod-security.kubernetes.io/enforce": "privileged",
-				})
-
-				newLabeledNsBuilder, err := labeledNsBuilder.Update()
-				Expect(err).ToNot(HaveOccurred(), "error labeling namespace %v :  %v ",
-					newLabeledNsBuilder.Definition.Name, err)
-
-				glog.V(gpuparams.GpuLogLevel).Infof("The nvidia-gpu-operator labeled namespace has "+
-					"labels:  %v", newLabeledNsBuilder.Object.Labels)
-			}
-
+			nsBuilder, err := dep.CreateAndLabelNamespaceIfNeeded()
+			Expect(err).NotTo(HaveOccurred())
 			defer func() {
 				err := nsBuilder.Delete()
 				Expect(err).ToNot(HaveOccurred())
 			}()
 
-			By("Create OperatorGroup in NVIDIA GPU Operator Namespace")
-			ogBuilder := olm.NewOperatorGroupBuilder(inittools.APIClient, gpuOperatorGroupName, nvidiaGPUNamespace)
-			if ogBuilder.Exists() {
-				glog.V(gpuparams.GpuLogLevel).Infof("The ogBuilder that exists has name:  %v",
-					ogBuilder.Object.Name)
-			} else {
-				glog.V(gpuparams.GpuLogLevel).Infof("Create a new operatorgroup with name:  %v",
-					ogBuilder.Object.Name)
-
-				ogBuilderCreated, err := ogBuilder.Create()
-				Expect(err).ToNot(HaveOccurred(), "error creating operatorgroup %v :  %v ",
-					ogBuilderCreated.Definition.Name, err)
-
-			}
-
+			subBuilder, ogBuilder, err := dep.DeployFromSubscription(gpuparams.GpuLogLevel, nvidiaGPUNamespace,
+				gpuSubscriptionName, gpuOperatorGroupName, gpuPackage, gpuCatalogSource, gpuInstallPlanApproval)
+			Expect(err).NotTo(HaveOccured())
 			defer func() {
-				err := ogBuilder.Delete()
-				Expect(err).ToNot(HaveOccurred())
+				ogErr := ogBuilder.Delete()
+				subErr := createdSub.Delete()
+				Expect(ogErr, subErr).ToNot(HaveOccurred())
+			}()
+			defer func() {
 			}()
 
-			By("Create Subscription in NVIDIA GPU Operator Namespace")
-			subBuilder := olm.NewSubscriptionBuilder(inittools.APIClient, gpuSubscriptionName, gpuSubscriptionNamespace,
-				gpuCatalogSource, gpuCatalogSourceNamespace, gpuPackage)
-
-			if gpuSubscriptionChannel != "undefined" {
-				glog.V(gpuparams.GpuLogLevel).Infof("Setting the subscription channel to: '%s'",
-					gpuSubscriptionChannel)
-				subBuilder.WithChannel(gpuSubscriptionChannel)
-			} else {
-				glog.V(gpuparams.GpuLogLevel).Infof("Setting the subscription channel to default channel: '%s'",
-					gpuChannelDefault)
-				subBuilder.WithChannel(gpuChannelDefault)
-			}
-
-			subBuilder.WithInstallPlanApproval(gpuInstallPlanApproval)
-
-			glog.V(gpuparams.GpuLogLevel).Infof("Creating the subscription, i.e Deploy the GPU operator")
-			createdSub, err := subBuilder.Create()
-
-			Expect(err).ToNot(HaveOccurred(), "error creating subscription %v :  %v ",
-				createdSub.Definition.Name, err)
-
-			glog.V(gpuparams.GpuLogLevel).Infof("Newly created subscription: %s was successfully created",
-				createdSub.Object.Name)
-
-			if createdSub.Exists() {
-				glog.V(gpuparams.GpuLogLevel).Infof("The newly created subscription: %s in namespace: %v "+
-					"has current CSV:  %v", createdSub.Object.Name, createdSub.Object.Namespace,
-					createdSub.Definition.Status.CurrentCSV)
-			}
-
-			defer func() {
-				err := createdSub.Delete()
-				Expect(err).ToNot(HaveOccurred())
-			}()
-
+			//FIXME: remove this section
 			By("Sleep for 2 minutes to allow the GPU Operator deployment to be created")
 			glog.V(gpuparams.GpuLogLevel).Infof("Sleep for 2 minutes to allow the GPU Operator deployment" +
 				" to be created")

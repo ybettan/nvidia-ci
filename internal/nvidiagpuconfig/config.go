@@ -11,6 +11,9 @@ type NvidiaGPUConfig struct {
 	InstanceType        string `envconfig:"NVIDIAGPU_GPU_MACHINESET_INSTANCE_TYPE"`
 	CatalogSource       string `envconfig:"NVIDIAGPU_CATALOGSOURCE"`
 	SubscriptionChannel string `envconfig:"NVIDIAGPU_SUBSCRIPTION_CHANNEL"`
+	CleanupAfterTest    bool   `envconfig:"NVIDIAGPU_CLEANUP" default:"true"`
+	DeployFromBundle    bool   `envconfig:"NVIDIAGPU_DEPLOY_FROM_BUNDLE" default:"false"`
+	BundleImage         string `envconfig:"NVIDIAGPU_BUNDLE_IMAGE"`
 }
 
 // NewNvidiaGPUConfig returns instance of NvidiaGPUConfig type.

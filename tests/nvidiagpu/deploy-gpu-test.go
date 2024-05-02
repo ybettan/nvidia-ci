@@ -25,6 +25,7 @@ import (
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/rh-ecosystem-edge/nvidia-ci/internal/check"
+	"github.com/rh-ecosystem-edge/nvidia-ci/internal/deploy"
 	"github.com/rh-ecosystem-edge/nvidia-ci/internal/get"
 	gpuburn "github.com/rh-ecosystem-edge/nvidia-ci/internal/gpu-burn"
 	"github.com/rh-ecosystem-edge/nvidia-ci/internal/gpuparams"
@@ -54,10 +55,15 @@ var (
 	nfdCleanupAfterInstall bool = false
 
 	// NvidiaGPUConfig provides access to general configuration parameters.
-	nvidiaGPUConfig        *nvidiagpuconfig.NvidiaGPUConfig
-	gpuScaleCluster        bool = false
-	gpuCatalogSource            = "undefined"
-	gpuSubscriptionChannel      = "undefined"
+	nvidiaGPUConfig               *nvidiagpuconfig.NvidiaGPUConfig
+	gpuScaleCluster               bool = false
+	gpuCatalogSource                   = "undefined"
+	gpuSubscriptionChannel             = "undefined"
+	gpuDefaultSubscriptionChannel      = "undefined"
+	cleanupAfterTest              bool = true
+	deployFromBundle              bool = false
+	gpuOperatorBundleImage             = ""
+	gpuCurrentCSVFromSub               = ""
 )
 
 const (
@@ -68,25 +74,30 @@ const (
 	nfdPackage                = "nfd"
 	nfdCRName                 = "nfd-instance"
 
-	nvidiaGPUNamespace        = "nvidia-gpu-operator"
-	nfdRhcosLabel             = "feature.node.kubernetes.io/system-os_release.ID"
-	nfdRhcosLabelValue        = "rhcos"
-	nvidiaGPULabel            = "feature.node.kubernetes.io/pci-10de.present"
-	gpuOperatorGroupName      = "gpu-og"
-	gpuOperatorDeployment     = "gpu-operator"
-	gpuSubscriptionName       = "gpu-subscription"
-	gpuSubscriptionNamespace  = "nvidia-gpu-operator"
-	gpuCatalogSourceDefault   = "certified-operators"
-	gpuCatalogSourceNamespace = "openshift-marketplace"
-	gpuPackage                = "gpu-operator-certified"
-	gpuClusterPolicyName      = "gpu-cluster-policy"
-	gpuBurnNamespace          = "test-gpu-burn"
-	gpuBurnPodName            = "gpu-burn-pod"
-	gpuBurnPodLabel           = "app=gpu-burn-app"
-	gpuBurnConfigmapName      = "gpu-burn-entrypoint"
+	nvidiaGPUNamespace                  = "nvidia-gpu-operator"
+	nfdRhcosLabel                       = "feature.node.kubernetes.io/system-os_release.ID"
+	nfdRhcosLabelValue                  = "rhcos"
+	nvidiaGPULabel                      = "feature.node.kubernetes.io/pci-10de.present"
+	gpuOperatorGroupName                = "gpu-og"
+	gpuOperatorDeployment               = "gpu-operator"
+	gpuSubscriptionName                 = "gpu-subscription"
+	gpuSubscriptionNamespace            = "nvidia-gpu-operator"
+	gpuCatalogSourceDefault             = "certified-operators"
+	gpuCatalogSourceNamespace           = "openshift-marketplace"
+	gpuPackage                          = "gpu-operator-certified"
+	gpuClusterPolicyName                = "gpu-cluster-policy"
+	gpuBurnNamespace                    = "test-gpu-burn"
+	gpuBurnPodName                      = "gpu-burn-pod"
+	gpuBurnPodLabel                     = "app=gpu-burn-app"
+	gpuBurnConfigmapName                = "gpu-burn-entrypoint"
+	gpuOperatorDefaultMasterBundleImage = "registry.gitlab.com/nvidia/kubernetes/gpu-operator/staging/gpu-operator-bundle:master-latest"
 )
 
 var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
+
+	var (
+		deployBundle deploy.Deploy
+	)
 
 	Context("DeployGpu", Label("deploy-gpu-with-dtk"), func() {
 
@@ -122,6 +133,35 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 				gpuSubscriptionChannel = nvidiaGPUConfig.SubscriptionChannel
 				glog.V(gpuparams.GpuLogLevel).Infof("GPU Subscription Channel now set to env variable "+
 					"NVIDIAGPU_SUBSCRIPTION_CHANNEL value '%s'", gpuSubscriptionChannel)
+			}
+
+			if nvidiaGPUConfig.CleanupAfterTest {
+				glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_CLEANUP" +
+					" is not set or is set to True, will cleanup resources after test case execution")
+				cleanupAfterTest = true
+			} else {
+				cleanupAfterTest = nvidiaGPUConfig.CleanupAfterTest
+				glog.V(gpuparams.GpuLogLevel).Infof("Flag to cleanup after test is set to env variable "+
+					"NVIDIAGPU_CLEANUP value '%v'", cleanupAfterTest)
+			}
+
+			if nvidiaGPUConfig.DeployFromBundle {
+				deployFromBundle = nvidiaGPUConfig.DeployFromBundle
+				glog.V(gpuparams.GpuLogLevel).Infof("Flag deploy GPU operator from bundle is set to env variable "+
+					"NVIDIAGPU_DEPLOY_FROM_BUNDLE value '%v'", deployFromBundle)
+				if nvidiaGPUConfig.BundleImage == "" {
+					glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_BUNDLE_IMAGE"+
+						" is not set, will use the default bundle image '%s'", gpuOperatorDefaultMasterBundleImage)
+					gpuOperatorBundleImage = gpuOperatorDefaultMasterBundleImage
+				} else {
+					gpuOperatorBundleImage = nvidiaGPUConfig.BundleImage
+					glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_BUNDLE_IMAGE"+
+						" is set, will use the specified bundle image '%s'", gpuOperatorBundleImage)
+				}
+			} else {
+				glog.V(gpuparams.GpuLogLevel).Infof("env variable NVIDIAGPU_DEPLOY_FROM_BUNDLE" +
+					" is set to false or is not set, will deploy GPU Operator from catalogsource")
+				deployFromBundle = false
 			}
 
 			By("Check if NFD is installed")
@@ -201,7 +241,7 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 
 		AfterAll(func() {
 
-			if nfdCleanupAfterInstall {
+			if nfdCleanupAfterInstall && cleanupAfterTest {
 				// Here need to check if NFD CR is deployed, otherwise Deleting a non-existing CR will throw an error
 				// skipping error check for now cause any failure before entire NFD stack
 				By("Delete NFD CR instance in NFD namespace")
@@ -293,17 +333,20 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 					pulledMachineSetBuilder.Definition.ObjectMeta.Name, err)
 
 				defer func() {
-					err := pulledMachineSetBuilder.Delete()
-					Expect(err).ToNot(HaveOccurred())
-
+					if cleanupAfterTest {
+						err := pulledMachineSetBuilder.Delete()
+						Expect(err).ToNot(HaveOccurred())
+					}
 					// later add wait for machineset to be deleted
 				}()
 			}
 
-			By("Sleep for 2 minutes to allow GPU worker node to be labeled by NFD")
-			glog.V(gpuparams.GpuLogLevel).Infof("Sleep for 2 minutes to allow the GPU worker nodes" +
-				" to be labeled by NFD")
-			time.Sleep(2 * time.Minute)
+			// Here we don't need this step is we already have a GPU worker node on cluster
+			if gpuScaleCluster {
+				glog.V(gpuparams.GpuLogLevel).Infof("Sleep for 2 minutes to allow the newly create GPU worker " +
+					"nodes to be labeled by NFD")
+				time.Sleep(2 * time.Minute)
+			}
 
 			By("Get Cluster Architecture from first GPU enabled worker node")
 			glog.V(gpuparams.GpuLogLevel).Infof("Getting cluster architecture from nodes with "+
@@ -313,21 +356,35 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 			glog.V(gpuparams.GpuLogLevel).Infof("cluster architecture for GPU enabled worker node is: %s",
 				clusterArch)
 
-			By("Check if 'gpu-operator-certified' packagemanifest exists in GPU catalog")
-			glog.V(gpuparams.GpuLogLevel).Infof("Using GPU catalogsource '%s'", gpuCatalogSource)
+			By("Check if GPU Operator Deployment is from Bundle")
+			if deployFromBundle {
+				glog.V(gpuparams.GpuLogLevel).Infof("Deploying GPU operator from bundle")
+				// This returns the Deploy interface object initialized with the API client
+				deployBundle = deploy.NewDeploy(inittools.APIClient)
+				gpuBundleConfig, err := deployBundle.GetBundleConfig(gpuparams.GpuLogLevel)
+				Expect(err).ToNot(HaveOccurred(), "error from deploy.GetBundleConfig %s ", err)
+				glog.V(gpuparams.GpuLogLevel).Infof("Extracted env var GPU_BUNDLE_IMAGE"+
+					" is '%s'", gpuBundleConfig.BundleImage)
 
-			gpuPkgManifestBuilderByCatalog, err := olm.PullPackageManifestByCatalog(inittools.APIClient,
-				gpuPackage, gpuCatalogSourceNamespace, gpuCatalogSource)
-			Expect(err).ToNot(HaveOccurred(), "error getting GPU packagemanifest %s from catalog %s:"+
-				"  %v", gpuPackage, gpuCatalogSource, err)
+			} else {
+				glog.V(gpuparams.GpuLogLevel).Infof("Deploying GPU operator from catalogsource")
 
-			glog.V(gpuparams.GpuLogLevel).Infof("The gpu packagemanifest name returned: %s",
-				gpuPkgManifestBuilderByCatalog.Object.Name)
+				By("Check if 'gpu-operator-certified' packagemanifest exists in GPU catalog")
+				glog.V(gpuparams.GpuLogLevel).Infof("Using GPU catalogsource '%s'", gpuCatalogSource)
 
-			By("Get the GPU Default Channel from Packagemanifest")
-			gpuChannelDefault := gpuPkgManifestBuilderByCatalog.Object.Status.DefaultChannel
-			glog.V(gpuparams.GpuLogLevel).Infof("The default gpu channel retrieved from packagemanifest is:  %v",
-				gpuChannelDefault)
+				gpuPkgManifestBuilderByCatalog, err := olm.PullPackageManifestByCatalog(inittools.APIClient,
+					gpuPackage, gpuCatalogSourceNamespace, gpuCatalogSource)
+				Expect(err).ToNot(HaveOccurred(), "error getting GPU packagemanifest %s from catalog %s:"+
+					"  %v", gpuPackage, gpuCatalogSource, err)
+
+				glog.V(gpuparams.GpuLogLevel).Infof("The gpu packagemanifest name returned: %s",
+					gpuPkgManifestBuilderByCatalog.Object.Name)
+
+				By("Get the GPU Default Channel from Packagemanifest")
+				gpuDefaultSubscriptionChannel = gpuPkgManifestBuilderByCatalog.Object.Status.DefaultChannel
+				glog.V(gpuparams.GpuLogLevel).Infof("The default gpu channel retrieved from packagemanifest is:  %v",
+					gpuDefaultSubscriptionChannel)
+			}
 
 			By("Check if NVIDIA GPU Operator namespace exists, otherwise created it and label it")
 			nsBuilder := namespace.NewBuilder(inittools.APIClient, nvidiaGPUNamespace)
@@ -360,66 +417,94 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 			}
 
 			defer func() {
-				err := nsBuilder.Delete()
-				Expect(err).ToNot(HaveOccurred())
+				if cleanupAfterTest {
+					err := nsBuilder.Delete()
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}()
 
-			By("Create OperatorGroup in NVIDIA GPU Operator Namespace")
-			ogBuilder := olm.NewOperatorGroupBuilder(inittools.APIClient, gpuOperatorGroupName, nvidiaGPUNamespace)
-			if ogBuilder.Exists() {
-				glog.V(gpuparams.GpuLogLevel).Infof("The ogBuilder that exists has name:  %v",
-					ogBuilder.Object.Name)
+			// Namespace needed to be created by this point or checked if created
+			if deployFromBundle {
+				glog.V(gpuparams.GpuLogLevel).Infof("Initializing the kube API Client before deploying bundle")
+				deployBundle = deploy.NewDeploy(inittools.APIClient)
+				gpuBundleConfig, err := deployBundle.GetBundleConfig(gpuparams.GpuLogLevel)
+				Expect(err).ToNot(HaveOccurred(), "error from deploy.GetBundleConfig %s ", err)
+
+				glog.V(gpuparams.GpuLogLevel).Infof("Extracted GPU Operator bundle image from env var "+
+					"NVIDIAGPU_BUNDLE_IMAGE '%s'", gpuBundleConfig.BundleImage)
+
+				glog.V(gpuparams.GpuLogLevel).Infof("Deploy the GPU Operator bundle '%s'",
+					gpuBundleConfig.BundleImage)
+				err = deployBundle.DeployBundle(gpuparams.GpuLogLevel, gpuBundleConfig, nvidiaGPUNamespace,
+					5*time.Minute)
+				Expect(err).ToNot(HaveOccurred(), "error from deploy.DeployBundle():  '%v' ", err)
+
+				glog.V(gpuparams.GpuLogLevel).Infof("GPU Operator bundle image '%s' deployed successfully "+
+					"in namespace '%s", gpuBundleConfig.BundleImage, nvidiaGPUNamespace)
+
 			} else {
-				glog.V(gpuparams.GpuLogLevel).Infof("Create a new operatorgroup with name:  %v",
-					ogBuilder.Object.Name)
+				By("Create OperatorGroup in NVIDIA GPU Operator Namespace")
+				ogBuilder := olm.NewOperatorGroupBuilder(inittools.APIClient, gpuOperatorGroupName, nvidiaGPUNamespace)
+				if ogBuilder.Exists() {
+					glog.V(gpuparams.GpuLogLevel).Infof("The ogBuilder that exists has name:  %v",
+						ogBuilder.Object.Name)
+				} else {
+					glog.V(gpuparams.GpuLogLevel).Infof("Create a new operatorgroup with name:  %v",
+						ogBuilder.Object.Name)
 
-				ogBuilderCreated, err := ogBuilder.Create()
-				Expect(err).ToNot(HaveOccurred(), "error creating operatorgroup %v :  %v ",
-					ogBuilderCreated.Definition.Name, err)
+					ogBuilderCreated, err := ogBuilder.Create()
+					Expect(err).ToNot(HaveOccurred(), "error creating operatorgroup %v :  %v ",
+						ogBuilderCreated.Definition.Name, err)
+				}
+
+				defer func() {
+					if cleanupAfterTest {
+						err := ogBuilder.Delete()
+						Expect(err).ToNot(HaveOccurred())
+					}
+				}()
+
+				By("Create Subscription in NVIDIA GPU Operator Namespace")
+				subBuilder := olm.NewSubscriptionBuilder(inittools.APIClient, gpuSubscriptionName, gpuSubscriptionNamespace,
+					gpuCatalogSource, gpuCatalogSourceNamespace, gpuPackage)
+
+				if gpuSubscriptionChannel != "undefined" {
+					glog.V(gpuparams.GpuLogLevel).Infof("Setting the subscription channel to: '%s'",
+						gpuSubscriptionChannel)
+					subBuilder.WithChannel(gpuSubscriptionChannel)
+				} else {
+					glog.V(gpuparams.GpuLogLevel).Infof("Setting the subscription channel to default channel: '%s'",
+						gpuDefaultSubscriptionChannel)
+					subBuilder.WithChannel(gpuDefaultSubscriptionChannel)
+				}
+
+				subBuilder.WithInstallPlanApproval(gpuInstallPlanApproval)
+
+				glog.V(gpuparams.GpuLogLevel).Infof("Creating the subscription, i.e Deploy the GPU operator")
+				createdSub, err := subBuilder.Create()
+
+				Expect(err).ToNot(HaveOccurred(), "error creating subscription %v :  %v ",
+					createdSub.Definition.Name, err)
+
+				glog.V(gpuparams.GpuLogLevel).Infof("Newly created subscription: %s was successfully created",
+					createdSub.Object.Name)
+
+				if createdSub.Exists() {
+					glog.V(gpuparams.GpuLogLevel).Infof("The newly created subscription: %s in namespace: %v "+
+						"has current CSV:  %v", createdSub.Object.Name, createdSub.Object.Namespace,
+						createdSub.Definition.Status.CurrentCSV)
+				}
+
+				defer func() {
+					if cleanupAfterTest {
+						err := createdSub.Delete()
+						Expect(err).ToNot(HaveOccurred())
+					}
+				}()
 
 			}
 
-			defer func() {
-				err := ogBuilder.Delete()
-				Expect(err).ToNot(HaveOccurred())
-			}()
-
-			By("Create Subscription in NVIDIA GPU Operator Namespace")
-			subBuilder := olm.NewSubscriptionBuilder(inittools.APIClient, gpuSubscriptionName, gpuSubscriptionNamespace,
-				gpuCatalogSource, gpuCatalogSourceNamespace, gpuPackage)
-
-			if gpuSubscriptionChannel != "undefined" {
-				glog.V(gpuparams.GpuLogLevel).Infof("Setting the subscription channel to: '%s'",
-					gpuSubscriptionChannel)
-				subBuilder.WithChannel(gpuSubscriptionChannel)
-			} else {
-				glog.V(gpuparams.GpuLogLevel).Infof("Setting the subscription channel to default channel: '%s'",
-					gpuChannelDefault)
-				subBuilder.WithChannel(gpuChannelDefault)
-			}
-
-			subBuilder.WithInstallPlanApproval(gpuInstallPlanApproval)
-
-			glog.V(gpuparams.GpuLogLevel).Infof("Creating the subscription, i.e Deploy the GPU operator")
-			createdSub, err := subBuilder.Create()
-
-			Expect(err).ToNot(HaveOccurred(), "error creating subscription %v :  %v ",
-				createdSub.Definition.Name, err)
-
-			glog.V(gpuparams.GpuLogLevel).Infof("Newly created subscription: %s was successfully created",
-				createdSub.Object.Name)
-
-			if createdSub.Exists() {
-				glog.V(gpuparams.GpuLogLevel).Infof("The newly created subscription: %s in namespace: %v "+
-					"has current CSV:  %v", createdSub.Object.Name, createdSub.Object.Namespace,
-					createdSub.Definition.Status.CurrentCSV)
-			}
-
-			defer func() {
-				err := createdSub.Delete()
-				Expect(err).ToNot(HaveOccurred())
-			}()
-
+			// Here we pick up after deploying the GPU bundle (which creates operator-group, subscription, csv, deployment
 			By("Sleep for 2 minutes to allow the GPU Operator deployment to be created")
 			glog.V(gpuparams.GpuLogLevel).Infof("Sleep for 2 minutes to allow the GPU Operator deployment" +
 				" to be created")
@@ -445,13 +530,29 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 					gpuOperatorDeployment.Definition.Name)
 			}
 
-			By("Get currentCSV from subscription")
-			gpuCurrentCSVFromSub, err := get.CurrentCSVFromSubscription(inittools.APIClient, gpuSubscriptionName,
-				gpuSubscriptionNamespace)
-			Expect(err).ToNot(HaveOccurred(), "error pulling currentCSV from cluster:  %v", err)
-			Expect(gpuCurrentCSVFromSub).ToNot(BeEmpty())
-			glog.V(gpuparams.GpuLogLevel).Infof("currentCSV %s extracted from Subscripion %s",
-				gpuCurrentCSVFromSub, gpuSubscriptionName)
+			// Need to handle this differently if deployed form bundle
+			if deployFromBundle {
+				By("Get the CSV deployed in NVIDIA GPU Operator Namespace")
+				bundleCSVBuilderList, err := olm.ListClusterServiceVersion(inittools.APIClient, nvidiaGPUNamespace)
+				Expect(err).ToNot(HaveOccurred(), "Error getting list of CSVs in namespace %s"+
+					": %v", nvidiaGPUNamespace, err)
+				// Get the first element in the list - should normally be just one
+				bundleCSVBuilder := bundleCSVBuilderList[0]
+				glog.V(gpuparams.GpuLogLevel).Infof("ClusterServiceVersion deployed from bundle is '%s",
+					bundleCSVBuilder.Definition.Name)
+
+				// save the deployed CSVBuilder object
+				gpuCurrentCSVFromSub = bundleCSVBuilder.Definition.Name
+
+			} else {
+				By("Get currentCSV from subscription")
+				gpuCurrentCSVFromSub, err = get.CurrentCSVFromSubscription(inittools.APIClient, gpuSubscriptionName,
+					gpuSubscriptionNamespace)
+				Expect(err).ToNot(HaveOccurred(), "error pulling currentCSV from cluster:  %v", err)
+				Expect(gpuCurrentCSVFromSub).ToNot(BeEmpty())
+				glog.V(gpuparams.GpuLogLevel).Infof("currentCSV %s extracted from Subscripion %s",
+					gpuCurrentCSVFromSub, gpuSubscriptionName)
+			}
 
 			By("Wait for ClusterServiceVersion to be in Succeeded phase")
 			glog.V(gpuparams.GpuLogLevel).Infof("Waiting for ClusterServiceVersion to be Succeeded phase")
@@ -478,8 +579,10 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 				"succeeded")
 
 			defer func() {
-				err := clusterCSV.Delete()
-				Expect(err).ToNot(HaveOccurred())
+				if cleanupAfterTest {
+					err := clusterCSV.Delete()
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}()
 
 			By("Get ALM examples block form CSV")
@@ -498,8 +601,10 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 				createdClusterPolicyBuilder.Definition.Name)
 
 			defer func() {
-				_, err := createdClusterPolicyBuilder.Delete()
-				Expect(err).ToNot(HaveOccurred())
+				if cleanupAfterTest {
+					_, err := createdClusterPolicyBuilder.Delete()
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}()
 
 			By("Pull the ClusterPolicy just created from cluster, with updated fields")
@@ -576,8 +681,10 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 			}
 
 			defer func() {
-				err := gpuBurnNsBuilder.Delete()
-				Expect(err).ToNot(HaveOccurred())
+				if cleanupAfterTest {
+					err := gpuBurnNsBuilder.Delete()
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}()
 
 			By("Deploy GPU Burn configmap in test-gpu-burn namespace")
@@ -596,8 +703,10 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 				configmapBuilder.Definition.Name)
 
 			defer func() {
-				err := configmapBuilder.Delete()
-				Expect(err).ToNot(HaveOccurred())
+				if cleanupAfterTest {
+					err := configmapBuilder.Delete()
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}()
 
 			By("Deploy gpu-burn pod in test-gpu-burn namespace")
@@ -630,8 +739,10 @@ var _ = Describe("GPU", Ordered, Label(tsparams.LabelSuite), func() {
 				"namespace '%s' :  %v ", gpuBurnNamespace, err)
 
 			defer func() {
-				_, err := gpuPodPulled.Delete()
-				Expect(err).ToNot(HaveOccurred())
+				if cleanupAfterTest {
+					_, err := gpuPodPulled.Delete()
+					Expect(err).ToNot(HaveOccurred())
+				}
 			}()
 
 			By("Wait for up to 3 minutes for gpu-burn pod to be in Running phase")

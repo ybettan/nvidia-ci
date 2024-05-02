@@ -63,9 +63,13 @@ The test-runner [script](scripts/test-runner.sh) is the recommended way for exec
 
 Parameters for the script are controlled by the following environment variables:
 - `TEST_FEATURES`: list of features to be tested.  Subdirectories under `tests` dir that match a feature will be included (internal directories are excluded).  When we have more than one subdirectlory ot tests, they can be listed comma separated.- _required_
-- `NVIDIAGPU_GPU_MACHINESET_INSTANCE_TYPE`: Use only when OCP is on a public cloud, and you need to scale the cluster to add a GPU-enabled compute node. Example instance type: "g4dn.xlarge" in AWS, or "a2-highgpu-1g" in GCP, or "Standard_NC4as_T4_v3" in Azure - _optional_
+- `NVIDIAGPU_GPU_MACHINESET_INSTANCE_TYPE`: Use only when OCP is on a public cloud, and when you need to scale the cluster to add a GPU-enabled compute node. If cluster already has a GPU enabled worker node, this variable should be unset.
+  - Example instance type: "g4dn.xlarge" in AWS, or "a2-highgpu-1g" in GCP, or "Standard_NC4as_T4_v3" in Azure - _required when need to scale cluster to add GPU node_
 - `NVIDIAGPU_CATALOGSOURCE`: custom catalogsource to be used.  If not specified, the default "certified-operators" catalog is used - _optional_
 - `NVIDIAGPU_SUBSCRIPTION_CHANNEL`: specific subscription channel to be used.  If not specified, the latest channel is used - _optional_
+- `NVIDIAGPU_BUNDLE_IMAGE`: GPU Operator bundle image to deploy with operator-sdk if NVIDIAGPU_DEPLOY_FROM_BUNDLE variable is set to true.  Default value for bundle image if not set: registry.gitlab.com/nvidia/kubernetes/gpu-operator/staging/gpu-operator-bundle:master-latest - _optional when deploying from bundlle_
+- `NVIDIAGPU_DEPLOY_FROM_BUNDLE`: boolean flag to deploy GPU operator from bundle image with operator-sdk - Default value is false - _required when deploying from bundle_
+- `NVIDIAGPU_CLEANUP`: boolean flag to cleanup up resources created by testcase after testcase execution - Default value is true - _required only when cleanup is not needed_
 - `TEST_LABELS`: ginkgo query passed to the label-filter option for including/excluding tests - _optional_ 
 - `VERBOSE_SCRIPT`: prints verbose script information when executing the script - _optional_
 - `TEST_VERBOSE`: executes ginkgo with verbose test output - _optional_
@@ -81,7 +85,7 @@ $ export REPORTS_DUMP_DIR=/tmp/nvidia-ci-logs-dir
 $ export TEST_FEATURES="nvidiagpu"
 $ export TEST_LABELS='nvidia-ci,gpu'
 $ export VERBOSE_LEVEL=100
-$ export NVIDIAGPU_INSTANCE_TYPE="g4dn.xlarge"
+$ export NVIDIAGPU_GPU_MACHINESET_INSTANCE_TYPE="g4dn.xlarge"
 $ export NVIDIAGPU_CATALOGSOURCE="certified-operators"
 $ export NVIDIAGPU_SUBSCRIPTION_CHANNEL="v23.9"
 $ make run-tests                    
